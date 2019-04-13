@@ -62,7 +62,8 @@ void start_packet_function(unsigned char *user, const struct pcap_pkthdr *h, con
     show_flag(ip_hdr);
     show_ttl(ip_hdr);
     show_prot(ip_hdr);
-    // ip_checksum(ip_hdr);
+    ip_hdr->check = ip_checksum(ip_hdr);
+    printf("checksum : %d\n", ip_hdr->check);
     show_ipaddr(ip_hdr);
 
     return;
@@ -79,11 +80,11 @@ void show_ipver(struct iphdr *ip_hdr)
     printf("Version: ");
     if (DPCP_IPV4_PKT == ip_hdr->version)
     {
-        printf("ipv4\n");
+        printf("IPv4\n");
     }
     else if (DPCP_IPV6_PKT == ip_hdr->version)
     {
-        printf("ipv6\n");
+        printf("IPv6\n");
     }
     else
     {
@@ -93,12 +94,12 @@ void show_ipver(struct iphdr *ip_hdr)
 
 void show_hdrlen(struct iphdr *ip_hdr)
 {
-    printf("ip header length: %u byte\n", ip_hdr->ihl * 4);
+    printf("IP Header Length: %u byte\n", ip_hdr->ihl * 4);
 }
 
 void show_ipprd(struct iphdr *ip_hdr)
 {
-    printf("ip precedence: ");
+    printf("IP precedence: ");
     if (0 == ip_hdr->tos & (0xFF & ~IPTOS_CLASS_MASK))
     {
         switch (IPTOS_PREC(ip_hdr->tos))
@@ -138,13 +139,13 @@ void show_dscp(struct iphdr *ip_hdr)
     printf("differentiated services code point\n");
     printf("----\n");
 
-    if (0 != dscp)
+    if (dscp != 0)
     {
-        if (0 == IPTOS_CLASS(dscp))
+        if (IPTOS_CLASS(dscp) == 0)
         {
             show_ipprd(ip_hdr);
         }
-        else if (IPTOS_DSCP_EF == dscp)
+        else if (dscp == IPTOS_DSCP_EF)
         {
             printf("expendited forwarding: true");
         }
@@ -195,6 +196,10 @@ void show_dscp(struct iphdr *ip_hdr)
             }
         }
     }
+    else
+    {
+        printf("Best effort\n");
+    }
 }
 
 void show_totlen(struct iphdr *ip_hdr)
@@ -211,17 +216,17 @@ void show_flag(struct iphdr *ip_hdr)
 {
     int flag = ntohs(ip_hdr->frag_off);
     printf("flag : ");
-    if (IP_DF == ip_hdr->frag_off)
+    if (IP_DF == flag)
     {
-        printf("don't fragment\n");
+        printf("Don't Fragment\n");
     }
-    else if (IP_MF == ip_hdr->frag_off)
+    else if (IP_MF == flag)
     {
-        printf("more fragment\n");
+        printf("More Fragment\n");
     }
     else
     {
-        printf("finish fragment\n");
+        printf("Finish Fragment\n");
     }
 
     printf("flagment offset : %u byte\n", (IP_OFFMASK & flag * 8));
@@ -234,18 +239,18 @@ void show_ttl(struct iphdr *ip_hdr)
 
 void show_prot(struct iphdr *ip_hdr)
 {
-    printf("protocol : ");
+    printf("Protocol : ");
     if (DPCP_PROT_ICMP == ip_hdr->protocol)
     {
-        printf("icmp\n");
+        printf("ICMP\n");
     }
     else if (DPCP_PROT_TCP == ip_hdr->protocol)
     {
-        printf("tcp\n");
+        printf("TCP\n");
     }
     else if (DPCP_PROT_UDP == ip_hdr->protocol)
     {
-        printf("udp\n");
+        printf("UDP\n");
     }
     else
     {
@@ -286,16 +291,16 @@ void show_ipaddr(struct iphdr *ip_hdr)
     struct in_addr *saddr = NULL;
     struct in_addr *daddr = NULL;
 
-    printf("source ip : ");
+    printf("Source IP : ");
     saddr = (struct in_addr *)&(ip_hdr->saddr);
     inet_ntop(AF_INET, saddr, &ip_str[0], (socklen_t)sizeof(ip_str));
     printf("%s\n", ip_str);
 
     memset(&ip_str[0], 0x00, sizeof(ip_str));
 
-    printf("destination ip : ");
+    printf("Destination IP : ");
     daddr = (struct in_addr *)&(ip_hdr->daddr);
-    inet_ntop(AF_INET, daddr, &ip_str[0], (socklen_t) sizeof(ip_str));
+    inet_ntop(AF_INET, daddr, &ip_str[0], (socklen_t)sizeof(ip_str));
     printf("%s\n", ip_str);
 
     return;
