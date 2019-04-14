@@ -1,10 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <pcap.h>
-#include <net/ethernet.h>
-#include <netinet/ip.h>
-#include <arpa/inet.h>
 #include "capture.h"
 
 int main(int argc, char *argv[])
@@ -14,7 +7,7 @@ int main(int argc, char *argv[])
 
     if (argc < 2)
     {
-        perror("you do not select NIC!");
+        perror("usage: <if name>\n");
         exit(EXIT_FAILURE);
     }
 
@@ -35,38 +28,42 @@ int main(int argc, char *argv[])
 
 void start_packet_function(unsigned char *user, const struct pcap_pkthdr *h, const unsigned char *p)
 {
-    printf("receive packet\n");
+    printf("----Receive Packet----\n");
 
-    char dmac[18] = {0};
-    char smac[18] = {0};
-    struct ether_header *eth_hdr = (struct ether_header *)p;
+    print_ether_header(p);
 
-    printf("ether header\n");
-    printf("dest mac %s\n", convmac_tostr(eth_hdr->ether_dhost, dmac, sizeof(dmac)));
-    printf("src mac %s\n", convmac_tostr(eth_hdr->ether_shost, smac, sizeof(smac)));
-    printf("ether type %x\n\n", ntohs(eth_hdr->ether_type));
-
-    struct iphdr *ip_hdr = NULL;
-    if (ETHERTYPE_IP != ntohs(eth_hdr->ether_type))
-    {
-        return;
-    }
-    ip_hdr = (struct iphdr *)(p + sizeof(struct ether_header));
-    printf("IP Packet Receive\n");
-
-    show_ipver(ip_hdr);
-    show_hdrlen(ip_hdr);
-    show_dscp(ip_hdr);
-    show_totlen(ip_hdr);
-    show_id(ip_hdr);
-    show_flag(ip_hdr);
-    show_ttl(ip_hdr);
-    show_prot(ip_hdr);
-    ip_hdr->check = ip_checksum(ip_hdr);
-    printf("checksum : %d\n", ip_hdr->check);
-    show_ipaddr(ip_hdr);
+    printf("----END----\n");
 
     return;
+}
+
+void print_ether_header(const unsigned char *p)
+{
+    struct ether_header *eth_hdr = (struct ether_header *)p;
+    char dmac[18] = {0};
+    char smac[18] = {0};
+    printf("----Ether Header----\n");
+    printf("Src MAC : %s\n", convmac_tostr(eth_hdr->ether_shost, smac, sizeof(smac)));
+    printf("Dest MAC : %s\n", convmac_tostr(eth_hdr->ether_dhost, dmac, sizeof(dmac)));
+    printf("Ether Type : 0x%x\n\n", ntohs(eth_hdr->ether_type));
+
+    switch (ntohs(eth_hdr->ether_type))
+    {
+    case ETHERTYPE_IP:
+        print_ip_header(p);
+        break;
+    case ETHERTYPE_IPV6:
+        printf("----IPv6 Packet Receive----\n");
+        break;
+    case ETHERTYPE_ARP:
+        print_arp_header(p);
+        break;
+    case ETHERTYPE_RRCP:
+        printf("----Realtek Remote Control Protocol Receive----\n");
+        break;
+    default:
+        break;
+    }
 }
 
 char *convmac_tostr(unsigned char *hwaddr, char *mac, size_t size)
@@ -75,7 +72,25 @@ char *convmac_tostr(unsigned char *hwaddr, char *mac, size_t size)
     return mac;
 }
 
-void show_ipver(struct iphdr *ip_hdr)
+void print_ip_header(const unsigned char *p)
+{
+    struct iphdr *ip_hdr = (struct iphdr *)(p + sizeof(struct ether_header));
+    printf("----IPv4 Packet Receive----\n");
+
+    print_ipver(ip_hdr);
+    print_hdrlen(ip_hdr);
+    print_dscp(ip_hdr);
+    print_totlen(ip_hdr);
+    print_id(ip_hdr);
+    print_flag(ip_hdr);
+    print_ttl(ip_hdr);
+    print_prot(ip_hdr, p);
+    ip_hdr->check = calc_ip_checksum(ip_hdr);
+    printf("checksum : %d\n", ip_hdr->check);
+    print_ipaddr(ip_hdr);
+}
+
+void print_ipver(struct iphdr *ip_hdr)
 {
     printf("Version: ");
     if (DPCP_IPV4_PKT == ip_hdr->version)
@@ -92,14 +107,14 @@ void show_ipver(struct iphdr *ip_hdr)
     }
 }
 
-void show_hdrlen(struct iphdr *ip_hdr)
+void print_hdrlen(struct iphdr *ip_hdr)
 {
     printf("IP Header Length: %u byte\n", ip_hdr->ihl * 4);
 }
 
-void show_ipprd(struct iphdr *ip_hdr)
+void print_ipprd(struct iphdr *ip_hdr)
 {
-    printf("IP precedence: ");
+    printf("IP Precedence: ");
     if (0 == ip_hdr->tos & (0xFF & ~IPTOS_CLASS_MASK))
     {
         switch (IPTOS_PREC(ip_hdr->tos))
@@ -133,25 +148,26 @@ void show_ipprd(struct iphdr *ip_hdr)
     }
 }
 
-void show_dscp(struct iphdr *ip_hdr)
+void print_dscp(struct iphdr *ip_hdr)
 {
     int dscp = IPTOS_DSCP(ip_hdr->tos);
-    printf("differentiated services code point\n");
-    printf("----\n");
+    printf("Differentiated Services Code Point : ");
 
     if (dscp != 0)
     {
+        printf("\n----\n");
         if (IPTOS_CLASS(dscp) == 0)
         {
-            show_ipprd(ip_hdr);
+            printf("Class Selector : \n");
+            print_ipprd(ip_hdr);
         }
         else if (dscp == IPTOS_DSCP_EF)
         {
-            printf("expendited forwarding: true");
+            printf("Expendited Forwarding: true");
         }
         else
         {
-            printf("assured forwarding : ");
+            printf("Assured Forwarding : ");
             switch (dscp)
             {
             case IPTOS_DSCP_AF11:
@@ -202,17 +218,17 @@ void show_dscp(struct iphdr *ip_hdr)
     }
 }
 
-void show_totlen(struct iphdr *ip_hdr)
+void print_totlen(struct iphdr *ip_hdr)
 {
     printf("total length : %u byte\n", ntohs(ip_hdr->tot_len));
 }
 
-void show_id(struct iphdr *ip_hdr)
+void print_id(struct iphdr *ip_hdr)
 {
     printf("identification : %u byte\n", ntohs(ip_hdr->id));
 }
 
-void show_flag(struct iphdr *ip_hdr)
+void print_flag(struct iphdr *ip_hdr)
 {
     int flag = ntohs(ip_hdr->frag_off);
     printf("flag : ");
@@ -232,25 +248,28 @@ void show_flag(struct iphdr *ip_hdr)
     printf("flagment offset : %u byte\n", (IP_OFFMASK & flag * 8));
 }
 
-void show_ttl(struct iphdr *ip_hdr)
+void print_ttl(struct iphdr *ip_hdr)
 {
     printf("time to live : %u\n", ip_hdr->ttl);
 }
 
-void show_prot(struct iphdr *ip_hdr)
+void print_prot(struct iphdr *ip_hdr, const unsigned char *p)
 {
     printf("Protocol : ");
     if (DPCP_PROT_ICMP == ip_hdr->protocol)
     {
         printf("ICMP\n");
+        print_icmp_header(p);
     }
     else if (DPCP_PROT_TCP == ip_hdr->protocol)
     {
         printf("TCP\n");
+        print_tcp_header(p);
     }
     else if (DPCP_PROT_UDP == ip_hdr->protocol)
     {
         printf("UDP\n");
+        print_udp_header(p);
     }
     else
     {
@@ -258,7 +277,47 @@ void show_prot(struct iphdr *ip_hdr)
     }
 }
 
-int ip_checksum(struct iphdr *ip_hdr)
+void print_icmp_header(const unsigned char *p)
+{
+    struct icmphdr *icmp_hdr = (struct icmphdr *)(p + sizeof(struct ether_header) + sizeof(struct iphdr));
+    printf("    ICMP Header\n");
+    printf("        Type : %u ", ntohs(icmp_hdr->type));
+    switch (ntohs(icmp_hdr->type))
+    {
+    case ICMP_ECHOREPLY:
+        printf("(ICMP Echo Reply)\n");
+        break;
+    case ICMP_TIME_EXCEEDED:
+        printf("(TTL Expired)\n");
+        break;
+    default:
+        printf("\n");
+        break;
+    }
+    printf("        Code : %u\n", ntohs(icmp_hdr->code));
+    printf("        Checksum : %u\n", ntohs(icmp_hdr->checksum));
+}
+
+void print_tcp_header(const unsigned char *p)
+{
+    struct tcphdr *tcp_hdr = (struct tcphdr *)(p + sizeof(struct ether_header) + sizeof(struct iphdr));
+    printf("    TCP Header\n");
+    printf("        Src Port : %u\n", ntohs(tcp_hdr->th_sport));
+    printf("        Dest Port : %u\n", ntohs(tcp_hdr->th_dport));
+    printf("        TCP Checksum : %u\n", ntohs(tcp_hdr->th_sum));
+}
+
+void print_udp_header(const unsigned char *p)
+{
+    struct udphdr *udp_hdr = (struct udphdr *)(p + sizeof(struct ether_header) + sizeof(struct iphdr));
+    printf("    UDP Header\n");
+    printf("        Src Port : %u\n", ntohs(udp_hdr->uh_sport));
+    printf("        Dest Port : %u\n", ntohs(udp_hdr->uh_dport));
+    printf("        UDP Length : %u bytes\n", ntohs(udp_hdr->uh_ulen));
+    printf("        UDP Checksum : %u\n", ntohs(udp_hdr->uh_sum));
+}
+
+int calc_ip_checksum(struct iphdr *ip_hdr)
 {
     int hdr_len = 0;
     int sum = 0;
@@ -285,7 +344,7 @@ int ip_checksum(struct iphdr *ip_hdr)
     return ~sum;
 }
 
-void show_ipaddr(struct iphdr *ip_hdr)
+void print_ipaddr(struct iphdr *ip_hdr)
 {
     char ip_str[18] = {0};
     struct in_addr *saddr = NULL;
@@ -304,4 +363,68 @@ void show_ipaddr(struct iphdr *ip_hdr)
     printf("%s\n", ip_str);
 
     return;
+}
+
+void print_arp_header(const unsigned char *p)
+{
+    struct arphdr *arp_hdr = (struct arphdr *)(p + sizeof(struct ether_header));
+    printf("----ARP Packet Receive----\n");
+    print_hardware_type(arp_hdr);
+    print_arp_prot(arp_hdr);
+    print_arp_operation(arp_hdr);
+}
+
+void print_hardware_type(struct arphdr *arp_hdr)
+{
+    printf("Hardware Type : ");
+    if (ntohs(arp_hdr->ar_hrd) == ARPHRD_ETHER)
+    {
+        printf("Ethernet\n");
+    }
+    else
+    {
+        printf("Not Ether\n");
+    }
+}
+
+void print_arp_prot(struct arphdr *arp_hdr)
+{
+    printf("Protocol Type : ");
+    if (ntohs(arp_hdr->ar_pro) == ETHERTYPE_IP)
+    {
+        printf("IP\n");
+    }
+    else
+    {
+        printf("Not IP\n");
+    }
+}
+
+void print_arp_operation(struct arphdr *arp_hdr)
+{
+    printf("Operation : ");
+    switch (ntohs(arp_hdr->ar_op))
+    {
+    case ARPOP_REQUEST:
+        printf("ARP REQUEST\n");
+        break;
+    case ARPOP_REPLY:
+        printf("ARP REPLY\n");
+        break;
+    case ARPOP_RREQUEST:
+        printf("ARP REVREQUEST\n");
+        break;
+    case ARPOP_RREPLY:
+        printf("ARP REVREPLY\n");
+        break;
+    case ARPOP_InREQUEST:
+        printf("ARP INVREQUEST\n");
+        break;
+    case ARPOP_InREPLY:
+        printf("ARP INVREPLY\n");
+        break;
+
+    default:
+        break;
+    }
 }
